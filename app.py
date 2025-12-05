@@ -86,72 +86,22 @@ with tab2:
                     base64_image = encode_image(uploaded_file)
                     
                     # 1단계: 이미지 분석 요청
+                    # [정밀도를 높인 새로운 프롬프트]
                     vision_prompt = """
-                    당신은 의료기기 광고 심의관입니다. 이 이미지가 '의료기기 광고 심의 규정'에 위배되는지 판단하세요.
-                    특히 혐오감(개구기, 피, 장기), 과대광고(CG 효과), 비포애프터 비교 여부를 봅니다.
-                    
-                    만약 위반 사항이 있다면, 이를 대체할 수 있는 '안전하고 세련된 광고용 이미지'를 그리기 위한 
-                    영어 프롬프트(DALL-E 3용)를 마지막에 작성해주세요.
-                    
-                    출력 형식:
-                    1. **심의 판정**: [승인 / 반려]
-                    2. **위반 이유**: (상세 설명)
-                    3. **수정 가이드**: (어떻게 바꿔야 하는지 한글 설명)
+                    당신은 대한민국 식약처(MFDS)의 숙련된 의료기기 심의관입니다.
+                    아래 이미지를 단계별로 정밀 분석하여 법령 위반 여부를 판단하세요.
+
+                    [분석 단계 - 반드시 이 순서대로 생각할 것]
+                    1. **시각적 요소 나열**: 이미지에 등장하는 모든 요소(사람, 표정, 도구, 텍스트, 신체 부위 등)를 있는 그대로 묘사하세요.
+                    2. **위험 요소 탐지**: 특히 '개구기(입 벌리는 도구)', '주사기', '피(혈흔)', '절개된 환부', '수술 장면', '과도한 CG(빛이 나가는 효과)'가 있는지 확인하세요.
+                    3. **규정 대조**: 의료기기법 시행규칙 별표7(혐오감 조성, 과대광고)에 해당하는지 대조하세요.
+                    4. **최종 판정**: 위 분석을 토대로 승인/반려를 결정하세요.
+
+                    [출력 형식]
+                    1. **상세 묘사**: (AI가 본 것을 나열)
+                    2. **심의 판정**: [승인 / 반려 / 주의]
+                    3. **위반 사유**: (구체적으로 어떤 물체가 문제가 되는지 지적)
+                    4. **수정 가이드**: (구체적인 개선 방향)
                     ---
-                    PROMPT: (여기에 DALL-E 3에게 줄 영문 프롬프트 작성.)
+                    PROMPT: (여기에 구글 이마젠 스타일의 실사 대체 이미지 프롬프트 작성)
                     """
-
-                    response = client.chat.completions.create(
-                        model="gpt-4o",
-                        messages=[
-                            {
-                                "role": "user",
-                                "content": [
-                                    {"type": "text", "text": vision_prompt},
-                                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}},
-                                ],
-                            }
-                        ],
-                    )
-                    
-                    result_text = response.choices[0].message.content
-                    
-                    # ========================================================
-                    # ★ 여기가 바로 선생님이 원하시던 '이마젠 스타일' 적용 부분입니다!
-                    # ========================================================
-                    base_prompt = "A hyper-realistic 8k photography of a medical device marketing image. Canon EOS R5 style, minimal, bright clinical lighting, clear focus, professional Korean model looking trustworthy and smiling naturally. No text overlays."
-
-                    if "PROMPT:" in result_text:
-                        extracted = result_text.split("PROMPT:")[1].strip()
-                        dalle_prompt = f"{extracted}, {base_prompt}"
-                    else:
-                        dalle_prompt = base_prompt
-                    # ========================================================
-
-                    with col_img1:
-                        st.markdown("### 📋 분석 결과")
-                        st.markdown(result_text.split("PROMPT:")[0]) # PROMPT 뒷부분은 숨김
-
-                    # 2단계: 이미지 생성
-                    with col_img2:
-                        st.markdown("### ✨ AI 추천 대체 이미지 (고화질)")
-                        if "반려" in result_text or "주의" in result_text or "위반" in result_text:
-                            st.write("규정에 맞는 안전한 이미지를 생성 중입니다...")
-                            
-                            with st.spinner("최고 화질로 렌더링 중... (약 15초)"):
-                                img_response = client.images.generate(
-                                    model="dall-e-3",
-                                    prompt=dalle_prompt,
-                                    size="1024x1024",
-                                    quality="hd", # 고화질 옵션
-                                    style="natural",
-                                    n=1,
-                                )
-                                image_url = img_response.data[0].url
-                                st.image(image_url, caption="Safe & High Quality Image", use_container_width=True)
-                                st.success("저작권 걱정 없는 광고용 이미지입니다.")
-                        else:
-                            st.success("이 이미지는 규정에 위배되지 않는 것으로 보입니다. (생성 생략)")
-
-                except Exception as e:
-                    st.error(f"오류가 발생했습니다: {e}")

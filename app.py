@@ -3,15 +3,15 @@ import openai
 import base64
 import streamlit_authenticator as stauth
 from PIL import Image
+import yaml
+from yaml.loader import SafeLoader
 
 # 페이지 설정
 st.set_page_config(page_title="Medi-Check Pro", page_icon="🏥", layout="wide")
 
 # ==========================================
-# 0. 로그인 시스템 (무료 프로토타입용)
+# 0. 로그인 시스템
 # ==========================================
-import yaml
-from yaml.loader import SafeLoader
 
 # 사용자 정보 (아이디: admin / 비번: 123)
 user_data = {
@@ -21,15 +21,11 @@ user_data = {
                 'name': '김대표',
                 'password': '123',
                 'email': 'admin@consul.team',
-            },
-            'user1': {
-                'name': '이팀장',
-                'password': '123',
-                'email': 'lee@test.com',
             }
         }
     },
-    'cookie': {'expiry_days': 0, 'key': 'secret_key', 'name': 'medi_cookie'}
+    'cookie': {'expiry_days': 0, 'key': 'secret_key', 'name': 'medi_cookie'},
+    'preauthorized': {'emails': []}
 }
 
 # 로그인 위젯 설정
@@ -38,10 +34,11 @@ authenticator = stauth.Authenticate(
     user_data['cookie']['name'],
     user_data['cookie']['key'],
     user_data['cookie']['expiry_days'],
+    user_data['preauthorized']
 )
 
-# 로그인 화면 출력
-name, authentication_status, username = authenticator.login('main')
+# ★ 여기가 수정된 부분입니다 ('Login' 글자 추가) ★
+name, authentication_status, username = authenticator.login('Login', 'main')
 
 if authentication_status == False:
     st.error('아이디 또는 비밀번호가 틀렸습니다.')
@@ -51,18 +48,16 @@ elif authentication_status == None:
     st.stop()
 
 # ==========================================
-# 로그인 성공 시 보이는 메인 화면
+# 로그인 성공 시 화면
 # ==========================================
 
 with st.sidebar:
-    st.title(f"👤 {name}님의 대시보드")
-    st.write("소속: Consul Team")
+    st.title(f"👤 {name}님 환영합니다")
+    authenticator.logout('로그아웃', 'sidebar')
     st.divider()
-    authenticator.logout('로그아웃', 'main')
     st.info("💡 프로토타입 버전입니다.")
 
 st.title("🏥 의료기기 광고 AI 통합 관리")
-st.write("3,4등급 의료기기 광고 심의 및 크리에이티브 생성")
 
 # API 키 설정
 api_key = st.secrets.get("OPENAI_API_KEY")
@@ -72,12 +67,10 @@ if not api_key:
 
 client = openai.OpenAI(api_key=api_key)
 
-# 탭 구성
 tab1, tab2 = st.tabs(["📄 텍스트 심의", "🖼️ 이미지 정밀 분석"])
 
 # --- 1. 텍스트 심의 ---
 with tab1:
-    st.subheader("광고 문구 법령 위반 여부 확인")
     col1, col2 = st.columns(2)
     with col1:
         ad_text = st.text_area("광고 문구를 입력하세요:", height=300)
@@ -98,14 +91,13 @@ with tab1:
                         st.success("분석 완료")
                         st.markdown(response.choices[0].message.content)
                     except Exception as e:
-                        st.error(f"오류 발생: {str(e)}")
+                        st.error(f"오류: {e}")
 
-# --- 2. 이미지 정밀 분석 (오류 났던 부분 수정 완료) ---
+# --- 2. 이미지 정밀 분석 ---
 def encode_image(image_file):
     return base64.b64encode(image_file.getvalue()).decode('utf-8')
 
 with tab2:
-    st.subheader("이미지 규정 위반 분석 및 대체안")
     uploaded_file = st.file_uploader("이미지 업로드", type=["jpg", "png", "jpeg"])
 
     if uploaded_file:
@@ -119,23 +111,20 @@ with tab2:
                 try:
                     base64_image = encode_image(uploaded_file)
                     
-                    # ★ 정밀 프롬프트 적용 ★
                     vision_prompt = """
-                    당신은 대한민국 식약처(MFDS) 의료기기 심의관입니다. 
-                    이미지를 '단계별로' 분석하여 규정 위반을 찾아내세요.
-
+                    당신은 식약처 의료기기 심의관입니다. 이미지를 '단계별로' 분석하여 규정 위반을 찾아내세요.
                     [분석 단계]
-                    1. 시각적 요소 나열: 이미지에 있는 도구(개구기, 주사기 등), 신체 반응(피, 상처), 표정 등을 먼저 서술하세요.
-                    2. 규정 대조: '혐오감 조성', '시술 장면 노출', '비포애프터 비교' 금지 조항과 대조하세요.
-                    3. 판정: 위 내용을 근거로 승인/반려를 결정하세요.
-
-                    출력 형식:
-                    1. **상세 관찰**: (보이는 대로 묘사)
-                    2. **심의 판정**: [승인 / 반려]
-                    3. **위반 사유**: (구체적 지적)
-                    4. **수정 가이드**: (개선안)
+                    1. 시각적 요소 나열: 도구(개구기, 주사기), 신체 반응(피, 상처), 표정 등.
+                    2. 규정 대조: '혐오감 조성', '시술 장면', '비포애프터 비교' 금지 조항.
+                    3. 판정: 승인/반려 결정.
+                    
+                    출력:
+                    1. 상세 관찰
+                    2. 심의 판정
+                    3. 위반 사유
+                    4. 수정 가이드
                     ---
-                    PROMPT: (DALL-E 3용 영어 프롬프트 작성)
+                    PROMPT: (DALL-E 3용 영어 프롬프트)
                     """
 
                     response = client.chat.completions.create(
@@ -152,8 +141,6 @@ with tab2:
                     )
                     
                     result_text = response.choices[0].message.content
-                    
-                    # 이마젠 스타일 프롬프트
                     base_prompt = "A hyper-realistic 8k photography of a medical device marketing image. Canon EOS R5 style, minimal, bright clinical lighting, clear focus, professional Korean model looking trustworthy and smiling naturally. No text overlays."
 
                     if "PROMPT:" in result_text:
@@ -177,6 +164,5 @@ with tab2:
                         else:
                             st.success("문제가 없는 이미지입니다.")
 
-                # ★ 이 부분이 아까 빠져서 에러가 났던 것입니다.
                 except Exception as e:
                     st.error(f"오류: {e}")

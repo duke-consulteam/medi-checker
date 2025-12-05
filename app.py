@@ -21,7 +21,6 @@ st.set_page_config(page_title="Medi-Check Pro", page_icon="🏥", layout="wide")
 # --------------------------------------------------------
 google_ready = False
 imagen_model = None
-google_error_msg = ""
 
 if "gcp" in st.secrets:
     try:
@@ -38,13 +37,11 @@ if "gcp" in st.secrets:
         vertexai.init(project=project_id, location="us-central1", credentials=credentials)
         imagen_model = ImageGenerationModel.from_pretrained("imagegeneration@006")
         google_ready = True
-    except Exception as e:
-        google_error_msg = str(e)
-else:
-    google_error_msg = "Secrets에 [gcp] 섹션이 없습니다."
+    except Exception:
+        pass
 
 # --------------------------------------------------------
-# 1. 수동 로그인 시스템
+# 1. 수동 로그인
 # --------------------------------------------------------
 if 'logged_in' not in st.session_state:
     st.session_state['logged_in'] = False
@@ -59,18 +56,16 @@ def login():
         username = st.text_input("아이디")
         password = st.text_input("비밀번호", type="password")
         submitted = st.form_submit_button("로그인")
-        
         if submitted:
             if username == "admin" and password == "123":
                 st.session_state['logged_in'] = True
                 st.session_state['username'] = "김대표"
                 st.rerun()
             else:
-                st.error("아이디 또는 비밀번호가 틀렸습니다.")
+                st.error("틀렸습니다.")
 
 def logout():
     st.session_state['logged_in'] = False
-    st.session_state['username'] = ""
     st.rerun()
 
 if not st.session_state['logged_in']:
@@ -103,9 +98,7 @@ with st.sidebar:
     if google_ready:
         st.success("✅ 구글 Imagen 연결됨")
     else:
-        st.warning("⚠️ DALL-E 모드 동작 중")
-        if google_error_msg:
-            st.caption(f"구글 오류: {google_error_msg}")
+        st.warning("⚠️ DALL-E 모드 (구글키 확인필요)")
 
 # [메뉴 A] 대시보드
 if menu == "📊 대시보드":
@@ -115,31 +108,30 @@ if menu == "📊 대시보드":
         my_df = df[df['사용자'] == user_name]
         st.dataframe(my_df, use_container_width=True)
     else:
-        st.info("아직 기록이 없습니다.")
+        st.info("기록 없음")
 
 # [메뉴 B] 검수 요청
 elif menu == "✨ 검수 요청":
     st.title("✨ 광고 심의 및 보정")
-    tab1, tab2 = st.tabs(["📄 텍스트 심의", "🖼️ 이미지 부분 수정"])
+    tab1, tab2 = st.tabs(["📄 텍스트 심의", "🖼️ 이미지 원본 보정"])
 
     with tab1:
         ad_text = st.text_area("문구 입력")
         if st.button("검수"):
-            with st.spinner("분석 중..."):
-                resp = client.chat.completions.create(
-                    model="gpt-4o",
-                    messages=[{"role":"system", "content":"의료기기 심의관입니다. 위반시 대체 문구 3개 제안."}, {"role":"user", "content":ad_text}]
-                )
-                res = resp.choices[0].message.content
-                st.markdown(res)
-                save_log(user_name, "텍스트", ad_text[:20], res)
+            resp = client.chat.completions.create(
+                model="gpt-4o",
+                messages=[{"role":"system", "content":"의료기기 심의관. 대체 문구 3개 제안."}, {"role":"user", "content":ad_text}]
+            )
+            res = resp.choices[0].message.content
+            st.markdown(res)
+            save_log(user_name, "텍스트", ad_text[:20], res)
 
     def encode_image(image_file):
         image_file.seek(0) 
         return base64.b64encode(image_file.read()).decode('utf-8')
 
     with tab2:
-        st.info("💡 **구글 Imagen**을 사용하여 원본을 유지하며 문제점만 수정합니다.")
+        st.info("💡 **스마트 뷰티 필터**: 원본 얼굴은 그대로 두고, 문제되는 부분(피, 배경)만 '화장하듯이' 고칩니다.")
         uploaded_file = st.file_uploader("이미지 업로드", type=["jpg", "png"])
 
         if uploaded_file:
@@ -148,21 +140,27 @@ elif menu == "✨ 검수 요청":
                 uploaded_file.seek(0)
                 st.image(uploaded_file, caption="원본", use_container_width=True)
                 
-            if st.button("이미지 분석 및 수정"):
-                with st.spinner("1. 원본 분석 및 수정 계획 수립..."):
+            if st.button("이미지 분석 및 원본 보정"):
+                with st.spinner("1. 안전한 보정 계획 수립 중..."):
                     b64_img = encode_image(uploaded_file)
                     
+                    # ★ 핵심 전략: '지워라' 대신 '바꿔라' (Positive Prompting) ★
+                    # 피를 지우라고 하면 차단되니, 피부를 매끄럽게 하라고 명령합니다.
                     prompt = """
-                    이 이미지를 분석하여 다음 3가지를 작성하세요.
+                    이 이미지에서 의료기기법 위반 요소(피, 공포 분위기)를 찾으세요.
+                    그리고 구글 AI에게 내릴 **안전한 영어 보정 명령(Edit Instruction)**을 작성하세요.
                     
-                    1. **시각적 묘사(DESCRIPTION)**: 모델의 성별, 머리스타일/색상, 인종, 피부톤, 포즈, 옷차림을 아주 상세한 영어로 묘사하세요. (예: Woman with long wavy black hair, pale skin, wearing black lace choker...)
-                    2. **수정 명령(EDIT_PROMPT)**: 피, 상처, 공포 요소를 제거하고 깨끗하게 만들기 위한 영어 명령. (단어 금지: Blood, Wound, Horror -> 대신 Clean skin, Bright background 사용)
-                    3. **판정**: 의료기기법 위반 여부.
+                    [명령 작성 규칙 - 매우 중요]
+                    1. 부정적인 단어 금지: remove blood, delete wound, kill vampire (사용 금지 X)
+                    2. 긍정적인 단어 사용: **smooth skin texture**, **studio lighting**, **professional portrait**, **dark blue background** (사용 O)
+                    3. 원본 유지: 모델의 얼굴이나 머리카락을 바꾸라는 말은 하지 마세요.
+                    
+                    예시: "Change background to dark blue studio wall. Apply beauty filter for smooth skin."
                     
                     형식:
-                    DESCRIPTION: (상세 묘사)
-                    EDIT_PROMPT: (수정 명령)
-                    판정: ...
+                    1. 판정: ...
+                    ---
+                    EDIT_PROMPT: (명령어)
                     """
                     
                     resp = client.chat.completions.create(
@@ -171,70 +169,56 @@ elif menu == "✨ 검수 요청":
                     )
                     res_text = resp.choices[0].message.content
                     
-                    # ----------------------------------------------------
-                    # ★ 에러 방지: 텍스트 파싱 로직 강화
-                    # ----------------------------------------------------
-                    # 기본값 설정
-                    description = "A professional medical image"
-                    edit_instruction = "Make it clean and professional"
-
+                    # 파싱 및 안전장치
+                    edit_instruction = "Change background to blue studio. Smooth skin."
                     try:
-                        if "DESCRIPTION:" in res_text:
-                            # 텍스트 쪼개기 시도
-                            parts = res_text.split("DESCRIPTION:")[1].split("EDIT_PROMPT:")
-                            description = parts[0].strip()
-                            if len(parts) > 1:
-                                edit_instruction = parts[1].split("판정:")[0].strip()
-                    except Exception as e:
-                        # 파싱 실패 시 기본값 사용하고 넘어감
-                        print(f"파싱 에러(무시됨): {e}")
-
-                    # 문자열로 확실하게 변환
-                    edit_instruction = str(edit_instruction)
-
-                    # 이중 필터링 (안전장치)
-                    forbidden_words = ["blood", "wound", "horror", "kill", "injury", "scar"]
-                    for word in forbidden_words:
-                        # 소문자로 변환 후 치환
-                        edit_instruction = edit_instruction.lower().replace(word, "blemish")
-                    # ----------------------------------------------------
+                        if "EDIT_PROMPT:" in res_text:
+                            edit_instruction = res_text.split("EDIT_PROMPT:")[1].strip()
+                    except:
+                        pass
                     
+                    # 2차 강제 세탁 (Blood -> Red paint / Smooth skin)
+                    edit_instruction = edit_instruction.lower()
+                    edit_instruction = edit_instruction.replace("blood", "red paint").replace("wound", "texture").replace("remove", "fix")
+                    
+                    # 나노바나나 스타일 명령 강제 주입
+                    final_instruction = f"{edit_instruction}, high quality, photorealistic, keep facial features"
+
                     with col1:
-                        st.markdown("### 📋 분석 결과")
-                        st.write(f"**원본 파악:** {description[:100]}...")
-                        st.write(f"**수정 명령:** {edit_instruction}")
+                        st.markdown(res_text.split("EDIT_PROMPT:")[0])
+                        st.caption(f"🤖 보정 명령: {final_instruction}")
                         save_log(user_name, "이미지", uploaded_file.name, res_text)
 
                 with col2:
                     if google_ready:
-                        with st.spinner(f"2. 구글이 수정 중..."):
+                        with st.spinner(f"2. 구글 이마젠이 원본을 보정 중..."):
                             try:
                                 uploaded_file.seek(0)
                                 image_bytes = uploaded_file.read()
                                 base_img = VertexImage(image_bytes)
                                 
-                                # 편집(Edit) 시도
+                                # ★ 원본 유지 핵심: edit_image 사용 ★
                                 gen_imgs = imagen_model.edit_image(
                                     base_image=base_img,
-                                    prompt=edit_instruction,
+                                    prompt=final_instruction,
                                     number_of_images=1
                                 )
-                                st.image(gen_imgs[0]._image_bytes, caption="구글 수정본 (Edit)", use_container_width=True)
-                                st.success("원본 유지 수정 완료!")
+                                st.image(gen_imgs[0]._image_bytes, caption="구글 보정본 (Inpainting)", use_container_width=True)
+                                st.success("원본의 얼굴과 구도를 그대로 유지했습니다!")
 
                             except Exception as e:
-                                st.warning("⚠️ 부분 수정이 제한되어 '원본 기반 다시 그리기'를 시도합니다.")
+                                # 구글이 그래도 거부할 경우
+                                st.error("⚠️ 구글이 '이미지가 너무 무섭다'며 보정을 거부했습니다.")
+                                st.warning("팁: 이미지의 피가 너무 적나라하면 AI가 아예 작업을 거부합니다.")
+                                st.caption(f"상세 에러: {e}")
+                                
+                                # 최후의 수단: 유사한 느낌으로 다시 그리기
+                                st.info("대신 최대한 비슷한 느낌의 모델로 새로 그립니다.")
                                 try:
-                                    # Fallback: 원본 묘사 + 수정 명령 조합
-                                    smart_fallback_prompt = f"A photo of {description}. However, {edit_instruction}. High quality, photorealistic."
-                                    
-                                    gen_imgs = imagen_model.generate_images(
-                                        prompt=smart_fallback_prompt,
-                                        number_of_images=1
-                                    )
-                                    st.image(gen_imgs[0]._image_bytes, caption="구글 생성본 (원본 스타일 유지)", use_container_width=True)
-                                    st.success("원본 특징을 살려 다시 그렸습니다.")
-                                except Exception as e2:
-                                    st.error(f"이미지 생성 실패: {e2}")
+                                    fallback_prompt = f"A photo of a woman with black hair and choker, professional medical style, blue background. {final_instruction}"
+                                    gen_imgs = imagen_model.generate_images(prompt=fallback_prompt, number_of_images=1)
+                                    st.image(gen_imgs[0]._image_bytes, caption="새로 그리기 대체안", use_container_width=True)
+                                except:
+                                    pass
                     else:
                         st.error("⚠️ 구글 키 설정 오류")

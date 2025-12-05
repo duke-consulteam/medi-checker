@@ -4,19 +4,33 @@ import base64
 import streamlit_authenticator as stauth
 from PIL import Image
 
+# --------------------------------------------------------
+# ★ 비밀번호 암호화 도구 불러오기 (버전별 호환성 처리)
+# --------------------------------------------------------
+try:
+    from streamlit_authenticator.utilities.hasher import Hasher
+except ImportError:
+    from streamlit_authenticator import Hasher
+
 # 페이지 설정
 st.set_page_config(page_title="Medi-Check Pro", page_icon="🏥", layout="wide")
 
 # ==========================================
-# 0. 로그인 시스템 설정
+# 0. 로그인 시스템
 # ==========================================
-# 사용자 정보 (아이디: admin / 비번: 123)
+
+# 1. 비밀번호 '123'을 암호화된 코드로 변환
+# (이렇게 해야 로그인이 됩니다)
+passwords_to_hash = ['123']
+hashed_passwords = Hasher(passwords_to_hash).generate()
+
+# 2. 사용자 정보 설정
 user_data = {
     'credentials': {
         'usernames': {
             'admin': {
                 'name': '김대표',
-                'password': '123',
+                'password': hashed_passwords[0], # 암호화된 비밀번호 사용
                 'email': 'admin@consul.team',
             }
         }
@@ -25,7 +39,7 @@ user_data = {
     'preauthorized': {'emails': []}
 }
 
-# 로그인 위젯 초기화
+# 3. 로그인 위젯 초기화
 authenticator = stauth.Authenticate(
     user_data['credentials'],
     user_data['cookie']['name'],
@@ -34,29 +48,31 @@ authenticator = stauth.Authenticate(
     user_data['preauthorized']
 )
 
-# ★ 수정된 부분: 괄호 안을 비워서 최신 버전에 맞췄습니다 ★
+# 4. 로그인 화면 출력
+# (최신 버전 호환을 위해 괄호를 비워둡니다)
 authenticator.login()
 
-# 로그인 상태 확인
+# 5. 로그인 상태 확인
 if st.session_state["authentication_status"] is False:
     st.error('아이디 또는 비밀번호가 틀렸습니다.')
     st.stop()
 elif st.session_state["authentication_status"] is None:
-    st.warning('아이디(admin)와 비밀번호(123)를 입력하세요.')
+    # st.warning('아이디...') -> 요청하신 대로 문구를 삭제했습니다.
     st.stop()
 
 # ==========================================
-# 로그인 성공 시에만 아래 내용이 실행됨
+# 로그인 성공 시 보이는 메인 화면
 # ==========================================
 
-# 사이드바 (로그아웃 버튼)
+# 사이드바
 with st.sidebar:
     st.title(f"👤 {st.session_state['name']}님 환영합니다")
+    # 로그아웃 버튼
     authenticator.logout('로그아웃', 'sidebar')
     st.divider()
     st.info("💡 프로토타입 버전입니다.")
 
-# 메인 화면
+# 메인 내용
 st.title("🏥 의료기기 광고 AI 통합 관리")
 
 # API 키 설정

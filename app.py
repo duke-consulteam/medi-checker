@@ -75,7 +75,7 @@ user_data = {
             'admin': {'name': '김대표', 'password': hashed_passwords[0], 'email': 'admin@consul.team'}
         }
     },
-    'cookie': {'expiry_days': 0, 'key': 'secret_key', 'name': 'medi_cookie'},
+    'cookie': {'expiry_days': 0, 'key': 'secret_key', 'name': 'medi_cookie_new'},
     'preauthorized': {'emails': []}
 }
 
@@ -90,3 +90,4 @@ elif st.session_state["authentication_status"] is None:
     st.stop()
 
 # ----------
+

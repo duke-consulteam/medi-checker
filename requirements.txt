@@ -1,7 +1,7 @@
 openai
 streamlit
 Pillow
-streamlit-authenticator==0.3.3
+streamlit-authenticator
 pyyaml
 pandas
-google-cloud-aiplatform>=1.43.0
+google-cloud-aiplatform

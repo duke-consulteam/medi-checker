@@ -36,7 +36,6 @@ if "gcp" in st.secrets:
         project_id = service_account_info["project_id"]
         vertexai.init(project=project_id, location="us-central1", credentials=credentials)
         
-        # 최신 모델 로드
         try:
             imagen_model = ImageGenerationModel.from_pretrained("imagen-3.0-generate-001")
         except:
@@ -104,7 +103,7 @@ if menu == "✨ 검수 및 보정":
         return base64.b64encode(image_file.read()).decode('utf-8')
 
     with tab2:
-        st.info("💡 **엄격한 원본 유지 모드**: 이미지를 새로 그리지 않고, 원본 위에 수정 사항만 반영합니다.")
+        st.info("💡 **원본 유지 모드**: 이미지를 새로 그리지 않고, 원본 위에 수정 사항만 반영합니다.")
         uploaded_file = st.file_uploader("이미지 업로드", type=["jpg", "png"])
 
         if uploaded_file:
@@ -120,8 +119,6 @@ if menu == "✨ 검수 및 보정":
                     with st.spinner("1. 이미지 분석 중..."):
                         b64_img = encode_image(uploaded_file)
                         
-                        # ★ 핵심 전략: '수정된 후의 모습'을 묘사하게 함 ★
-                        # Edit 기능은 "명령"보다 "최종 결과물에 대한 묘사"가 더 정확합니다.
                         prompt = """
                         이 이미지에서 의료기기법 위반 요소(주사기, 크림 바르는 손, 피 등)를 찾으세요.
                         그리고 구글 Imagen 3가 **원본을 수정할 때 사용할 프롬프트**를 작성하세요.
@@ -149,12 +146,11 @@ if menu == "✨ 검수 및 보정":
                         except:
                             pass
                         
-                        # 안전 세탁 (주사기, 피 관련 단어 제거)
+                        # 안전 세탁
                         remove_words = ["blood", "syringe", "needle", "glove", "hand", "cream", "brush", "tool", "wound"]
                         for word in remove_words:
                             edit_prompt = edit_prompt.lower().replace(word, "")
                         
-                        # 원본 유지 강화 키워드
                         final_prompt = f"{edit_prompt}, exact same face, highly detailed, 8k, photorealistic"
 
                         with col1:
@@ -170,17 +166,18 @@ if menu == "✨ 검수 및 보정":
                                 image_bytes = uploaded_file.read()
                                 base_img = VertexImage(image_bytes)
                                 
-                                # ★ Generate(생성) 코드 삭제함 ★
-                                # 오직 Edit(수정)만 시도합니다.
-                                gen_imgs = imagen_model.edit_image(
+                                # 수정 요청
+                                response = imagen_model.edit_image(
                                     base_image=base_img,
                                     prompt=final_prompt,
                                     number_of_images=1,
-                                    guidance_scale=60, # 원본 유지 강도 (높을수록 원본 고수)
+                                    guidance_scale=60,
                                 )
                                 
-                                if gen_imgs and len(gen_imgs) > 0:
-                                    st.image(gen_imgs[0]._image_bytes, caption="AI 수정본 (Edit)", use_container_width=True)
+                                # ★★★ 에러 수정 완료 ★★★
+                                # len(response) 대신 response.images를 확인
+                                if response.images:
+                                    st.image(response.images[0]._image_bytes, caption="AI 수정본 (Edit)", use_container_width=True)
                                     st.success("원본 위에서 수정했습니다.")
                                 else:
                                     st.error("구글이 이미지를 반환하지 않았습니다.")
@@ -188,8 +185,7 @@ if menu == "✨ 검수 및 보정":
                             except Exception as e:
                                 st.error("❌ 수정 실패")
                                 st.error(f"구글 에러 메시지: {e}")
-                                st.warning("TIP: 구글이 '이미지가 너무 선정적'이거나 '얼굴 조작'이라고 판단하면 아예 거부할 수 있습니다.")
-                                st.info("새로 그리기는 하지 않았습니다.")
+                                st.warning("TIP: '새로 그리기'로 전환되지 않고 종료되었습니다.")
 
 # --------------------------------------------------------
 # [메뉴 B] 대시보드

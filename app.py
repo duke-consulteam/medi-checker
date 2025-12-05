@@ -11,7 +11,7 @@ import json
 try:
     from google.oauth2 import service_account
     import vertexai
-    from vertexai.preview.vision_models import ImageGenerationModel, Image
+    from vertexai.preview.vision_models import ImageGenerationModel, Image as VertexImage
 except ImportError:
     pass
 
@@ -24,7 +24,7 @@ except ImportError:
 st.set_page_config(page_title="Medi-Check Pro", page_icon="🏥", layout="wide")
 
 # --------------------------------------------------------
-# 0. 구글 연결 설정 (자동 보정 기능 탑재)
+# 0. 구글 연결 설정
 # --------------------------------------------------------
 google_ready = False
 imagen_model = None
@@ -32,36 +32,23 @@ google_error_msg = ""
 
 if "gcp" in st.secrets:
     try:
-        # 1. Secrets 정보를 가져옵니다. (수정 가능한 딕셔너리로 변환)
         service_account_info = dict(st.secrets["gcp"])
-
-        # ★ 핵심 수정 1: 줄바꿈 문자(\n) 자동 복구 ★
         if "private_key" in service_account_info:
             service_account_info["private_key"] = service_account_info["private_key"].replace("\\n", "\n")
-
-        # ★ 핵심 수정 2: 빠진 필수 항목(token_uri) 자동 주입 ★
-        # 이 부분이 없어서 방금 에러가 난 것입니다. 코드가 알아서 채워넣습니다.
         if "token_uri" not in service_account_info:
             service_account_info["token_uri"] = "https://oauth2.googleapis.com/token"
         if "type" not in service_account_info:
             service_account_info["type"] = "service_account"
 
-        # 2. 구글 인증
         credentials = service_account.Credentials.from_service_account_info(service_account_info)
-        
-        # 3. Vertex AI 초기화
         project_id = service_account_info["project_id"]
         vertexai.init(project=project_id, location="us-central1", credentials=credentials)
-        
-        # 4. 모델 로드
         imagen_model = ImageGenerationModel.from_pretrained("imagegeneration@006")
         google_ready = True
-        
     except Exception as e:
         google_error_msg = str(e)
 else:
     google_error_msg = "Secrets에 [gcp] 섹션이 없습니다."
-
 
 # --------------------------------------------------------
 # 1. 데이터 저장 및 로그인
@@ -115,14 +102,12 @@ with st.sidebar:
     st.divider()
     authenticator.logout('로그아웃', 'sidebar')
     
-    # 연결 상태 표시
     if google_ready:
         st.success("✅ 구글 Imagen 연결됨")
     else:
         st.warning("⚠️ DALL-E 모드 동작 중")
         if google_error_msg:
-            st.error(f"오류: {google_error_msg}")
-
+            st.caption(f"구글 오류: {google_error_msg}")
 
 # [메뉴 A] 대시보드
 if menu == "📊 대시보드":
@@ -137,9 +122,8 @@ if menu == "📊 대시보드":
 # [메뉴 B] 검수 요청
 elif menu == "✨ 검수 요청":
     st.title("✨ 광고 심의 및 보정")
-    tab1, tab2 = st.tabs(["📄 텍스트 심의", "🖼️ 이미지 부분 수정(Inpainting)"])
+    tab1, tab2 = st.tabs(["📄 텍스트 심의", "🖼️ 이미지 부분 수정"])
 
-    # 텍스트 심의
     with tab1:
         ad_text = st.text_area("문구 입력")
         if st.button("검수"):
@@ -152,9 +136,10 @@ elif menu == "✨ 검수 요청":
                 st.markdown(res)
                 save_log(st.session_state['username'], "텍스트", ad_text[:20], res)
 
-    # 이미지 수정 (구글 Imagen 사용)
     def encode_image(image_file):
-        return base64.b64encode(image_file.getvalue()).decode('utf-8')
+        # ★ 핵심 수정: 파일 읽기 위치 초기화 ★
+        image_file.seek(0) 
+        return base64.b64encode(image_file.read()).decode('utf-8')
 
     with tab2:
         st.info("💡 **구글 Imagen**을 사용하여 원본을 유지하며 문제점만 수정합니다.")
@@ -163,6 +148,8 @@ elif menu == "✨ 검수 요청":
         if uploaded_file:
             col1, col2 = st.columns(2)
             with col1:
+                # 미리보기를 위해 파일 위치 초기화
+                uploaded_file.seek(0)
                 st.image(uploaded_file, caption="원본", use_container_width=True)
                 
             if st.button("이미지 분석 및 수정"):
@@ -172,10 +159,11 @@ elif menu == "✨ 검수 요청":
                     prompt = """
                     이 이미지의 의료기기법 위반 요소(피, 공포감)를 찾고,
                     구글 Imagen용 영어 수정 명령(Edit Instruction)을 작성하세요.
+                    명령은 'Remove blood', 'Make background blue' 처럼 명확해야 합니다.
                     형식:
                     1. 판정: ...
                     ---
-                    EDIT_PROMPT: (예: Remove blood from lips, Make background bright blue)
+                    EDIT_PROMPT: (수정 명령)
                     """
                     resp = client.chat.completions.create(
                         model="gpt-4o",
@@ -186,7 +174,7 @@ elif menu == "✨ 검수 요청":
                     if "EDIT_PROMPT:" in res_text:
                         edit_instruction = res_text.split("EDIT_PROMPT:")[1].strip()
                     else:
-                        edit_instruction = "Make it clean and professional"
+                        edit_instruction = "Make it clean and professional medical image"
                     
                     with col1:
                         st.markdown(res_text.split("EDIT_PROMPT:")[0])
@@ -197,16 +185,32 @@ elif menu == "✨ 검수 요청":
                     if google_ready:
                         with st.spinner(f"2. 구글이 수정 중... '{edit_instruction}'"):
                             try:
-                                img_bytes = uploaded_file.getvalue()
-                                base_img = Image(img_bytes)
+                                # ★ 핵심 수정: 파일 위치 초기화 후 구글로 전달 ★
+                                uploaded_file.seek(0)
+                                image_bytes = uploaded_file.read()
+                                base_img = VertexImage(image_bytes)
+                                
+                                # 1차 시도: 편집(Edit) 모드
                                 gen_imgs = imagen_model.edit_image(
                                     base_image=base_img,
                                     prompt=edit_instruction,
                                     number_of_images=1
                                 )
-                                st.image(gen_imgs[0]._image_bytes, caption="구글 수정본", use_container_width=True)
+                                st.image(gen_imgs[0]._image_bytes, caption="구글 수정본 (Edit)", use_container_width=True)
                                 st.success("수정 완료!")
+
                             except Exception as e:
-                                st.error(f"구글 수정 실패: {e}")
+                                # 편집 실패 시 생성(Generate)으로 자동 전환 (안전장치)
+                                st.warning(f"⚠️ 부분 수정(Edit)이 불안정하여 '새로 그리기(Re-creation)'로 전환합니다. (사유: {e})")
+                                try:
+                                    gen_imgs = imagen_model.generate_images(
+                                        prompt=f"A professional medical photo based on this description: {edit_instruction}. High quality, photorealistic, clean.",
+                                        number_of_images=1
+                                    )
+                                    st.image(gen_imgs[0]._image_bytes, caption="구글 생성본 (Re-create)", use_container_width=True)
+                                    st.success("대체 이미지 생성 완료!")
+                                except Exception as e2:
+                                    st.error(f"이미지 생성 실패: {e2}")
+
                     else:
-                        st.error("⚠️ 구글 연결 오류 (사이드바 확인)")
+                        st.error("⚠️ 구글 키 설정 오류")

@@ -6,7 +6,7 @@ from datetime import datetime
 from PIL import Image
 import json
 
-# 구글 라이브러리
+# 구글 라이브러리 로드
 try:
     from google.oauth2 import service_account
     import vertexai
@@ -152,7 +152,6 @@ elif menu == "✨ 검수 요청":
                 with st.spinner("1. 원본 분석 및 수정 계획 수립..."):
                     b64_img = encode_image(uploaded_file)
                     
-                    # ★ 핵심 수정: 원본의 생김새를 묘사(Describe)하게 시킴 ★
                     prompt = """
                     이 이미지를 분석하여 다음 3가지를 작성하세요.
                     
@@ -172,17 +171,70 @@ elif menu == "✨ 검수 요청":
                     )
                     res_text = resp.choices[0].message.content
                     
-                    # 묘사와 명령을 분리해서 추출
-                    description = "A professional person"
-                    edit_instruction = "Make it clean"
-                    
-                    if "DESCRIPTION:" in res_text:
-                        parts = res_text.split("DESCRIPTION:")[1].split("EDIT_PROMPT:")
-                        description = parts[0].strip()
-                        if len(parts) > 1:
-                            edit_instruction = parts[1].split("판정:")[0].strip()
-                    
-                    # 이중 필터링
+                    # ----------------------------------------------------
+                    # ★ 에러 방지: 텍스트 파싱 로직 강화
+                    # ----------------------------------------------------
+                    # 기본값 설정
+                    description = "A professional medical image"
+                    edit_instruction = "Make it clean and professional"
+
+                    try:
+                        if "DESCRIPTION:" in res_text:
+                            # 텍스트 쪼개기 시도
+                            parts = res_text.split("DESCRIPTION:")[1].split("EDIT_PROMPT:")
+                            description = parts[0].strip()
+                            if len(parts) > 1:
+                                edit_instruction = parts[1].split("판정:")[0].strip()
+                    except Exception as e:
+                        # 파싱 실패 시 기본값 사용하고 넘어감
+                        print(f"파싱 에러(무시됨): {e}")
+
+                    # 문자열로 확실하게 변환
+                    edit_instruction = str(edit_instruction)
+
+                    # 이중 필터링 (안전장치)
                     forbidden_words = ["blood", "wound", "horror", "kill", "injury", "scar"]
                     for word in forbidden_words:
-                        edit_instruction = edit_instruction.lower().repl
+                        # 소문자로 변환 후 치환
+                        edit_instruction = edit_instruction.lower().replace(word, "blemish")
+                    # ----------------------------------------------------
+                    
+                    with col1:
+                        st.markdown("### 📋 분석 결과")
+                        st.write(f"**원본 파악:** {description[:100]}...")
+                        st.write(f"**수정 명령:** {edit_instruction}")
+                        save_log(user_name, "이미지", uploaded_file.name, res_text)
+
+                with col2:
+                    if google_ready:
+                        with st.spinner(f"2. 구글이 수정 중..."):
+                            try:
+                                uploaded_file.seek(0)
+                                image_bytes = uploaded_file.read()
+                                base_img = VertexImage(image_bytes)
+                                
+                                # 편집(Edit) 시도
+                                gen_imgs = imagen_model.edit_image(
+                                    base_image=base_img,
+                                    prompt=edit_instruction,
+                                    number_of_images=1
+                                )
+                                st.image(gen_imgs[0]._image_bytes, caption="구글 수정본 (Edit)", use_container_width=True)
+                                st.success("원본 유지 수정 완료!")
+
+                            except Exception as e:
+                                st.warning("⚠️ 부분 수정이 제한되어 '원본 기반 다시 그리기'를 시도합니다.")
+                                try:
+                                    # Fallback: 원본 묘사 + 수정 명령 조합
+                                    smart_fallback_prompt = f"A photo of {description}. However, {edit_instruction}. High quality, photorealistic."
+                                    
+                                    gen_imgs = imagen_model.generate_images(
+                                        prompt=smart_fallback_prompt,
+                                        number_of_images=1
+                                    )
+                                    st.image(gen_imgs[0]._image_bytes, caption="구글 생성본 (원본 스타일 유지)", use_container_width=True)
+                                    st.success("원본 특징을 살려 다시 그렸습니다.")
+                                except Exception as e2:
+                                    st.error(f"이미지 생성 실패: {e2}")
+                    else:
+                        st.error("⚠️ 구글 키 설정 오류")

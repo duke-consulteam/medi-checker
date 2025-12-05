@@ -44,9 +44,8 @@ else:
     google_error_msg = "Secrets에 [gcp] 섹션이 없습니다."
 
 # --------------------------------------------------------
-# 1. 수동 로그인 시스템 (라이브러리 미사용 - 에러 없음)
+# 1. 수동 로그인 시스템
 # --------------------------------------------------------
-# 세션 초기화
 if 'logged_in' not in st.session_state:
     st.session_state['logged_in'] = False
 if 'username' not in st.session_state:
@@ -62,11 +61,10 @@ def login():
         submitted = st.form_submit_button("로그인")
         
         if submitted:
-            # ★ 아이디/비번 설정 (여기서 수정 가능) ★
             if username == "admin" and password == "123":
                 st.session_state['logged_in'] = True
                 st.session_state['username'] = "김대표"
-                st.rerun() # 화면 새로고침
+                st.rerun()
             else:
                 st.error("아이디 또는 비밀번호가 틀렸습니다.")
 
@@ -75,14 +73,9 @@ def logout():
     st.session_state['username'] = ""
     st.rerun()
 
-# 로그인이 안 되어 있으면 로그인 화면만 보여주고 중단
 if not st.session_state['logged_in']:
     login()
     st.stop()
-
-# ========================================================
-# 여기서부터는 로그인이 성공해야만 보입니다
-# ========================================================
 
 def save_log(username, type, input_summary, result):
     st.session_state['history'].append({
@@ -119,7 +112,6 @@ if menu == "📊 대시보드":
     st.title("📊 캠페인 관리")
     df = pd.DataFrame(st.session_state['history'])
     if not df.empty:
-        # 내 기록만 보기
         my_df = df[df['사용자'] == user_name]
         st.dataframe(my_df, use_container_width=True)
     else:
@@ -157,21 +149,21 @@ elif menu == "✨ 검수 요청":
                 st.image(uploaded_file, caption="원본", use_container_width=True)
                 
             if st.button("이미지 분석 및 수정"):
-                with st.spinner("1. 안전한 수정 명령 생성 중..."):
+                with st.spinner("1. 원본 분석 및 수정 계획 수립..."):
                     b64_img = encode_image(uploaded_file)
                     
+                    # ★ 핵심 수정: 원본의 생김새를 묘사(Describe)하게 시킴 ★
                     prompt = """
-                    이 이미지에서 의료기기법 위반 요소(피, 공포감 등)를 찾으세요.
-                    그리고 이를 구글 AI로 수정하기 위한 '영어 프롬프트(Edit Instruction)'를 작성하세요.
+                    이 이미지를 분석하여 다음 3가지를 작성하세요.
                     
-                    🚨 [단어 금지 규칙]
-                    - 금지: Blood, Wound, Injury, Scar, Horror, Vampire, Kill, Death
-                    - 사용: Clean skin, Professional doctor, Bright background
+                    1. **시각적 묘사(DESCRIPTION)**: 모델의 성별, 머리스타일/색상, 인종, 피부톤, 포즈, 옷차림을 아주 상세한 영어로 묘사하세요. (예: Woman with long wavy black hair, pale skin, wearing black lace choker...)
+                    2. **수정 명령(EDIT_PROMPT)**: 피, 상처, 공포 요소를 제거하고 깨끗하게 만들기 위한 영어 명령. (단어 금지: Blood, Wound, Horror -> 대신 Clean skin, Bright background 사용)
+                    3. **판정**: 의료기기법 위반 여부.
                     
                     형식:
-                    1. 판정: ...
-                    ---
-                    EDIT_PROMPT: (안전한 영어 단어만 사용한 수정 명령)
+                    DESCRIPTION: (상세 묘사)
+                    EDIT_PROMPT: (수정 명령)
+                    판정: ...
                     """
                     
                     resp = client.chat.completions.create(
@@ -180,46 +172,17 @@ elif menu == "✨ 검수 요청":
                     )
                     res_text = resp.choices[0].message.content
                     
-                    if "EDIT_PROMPT:" in res_text:
-                        edit_instruction = res_text.split("EDIT_PROMPT:")[1].strip()
-                    else:
-                        edit_instruction = "Make the person look professional and clean"
+                    # 묘사와 명령을 분리해서 추출
+                    description = "A professional person"
+                    edit_instruction = "Make it clean"
                     
-                    # 파이썬 이중 필터링
+                    if "DESCRIPTION:" in res_text:
+                        parts = res_text.split("DESCRIPTION:")[1].split("EDIT_PROMPT:")
+                        description = parts[0].strip()
+                        if len(parts) > 1:
+                            edit_instruction = parts[1].split("판정:")[0].strip()
+                    
+                    # 이중 필터링
                     forbidden_words = ["blood", "wound", "horror", "kill", "injury", "scar"]
                     for word in forbidden_words:
-                        edit_instruction = edit_instruction.lower().replace(word, "blemish")
-                    
-                    with col1:
-                        st.markdown(res_text.split("EDIT_PROMPT:")[0])
-                        st.caption(f"🤖 명령: '{edit_instruction}'")
-                        save_log(user_name, "이미지", uploaded_file.name, res_text)
-
-                with col2:
-                    if google_ready:
-                        with st.spinner(f"2. 구글이 수정 중..."):
-                            try:
-                                uploaded_file.seek(0)
-                                image_bytes = uploaded_file.read()
-                                base_img = VertexImage(image_bytes)
-                                
-                                gen_imgs = imagen_model.edit_image(
-                                    base_image=base_img,
-                                    prompt=edit_instruction,
-                                    number_of_images=1
-                                )
-                                st.image(gen_imgs[0]._image_bytes, caption="구글 수정본", use_container_width=True)
-                                st.success("수정 완료!")
-
-                            except Exception as e:
-                                st.warning("⚠️ 부분 수정 실패. 새로 그리기로 전환합니다.")
-                                try:
-                                    safe_gen_prompt = f"Professional medical photo. {edit_instruction}. Clean atmosphere."
-                                    gen_imgs = imagen_model.generate_images(
-                                        prompt=safe_gen_prompt, number_of_images=1
-                                    )
-                                    st.image(gen_imgs[0]._image_bytes, caption="구글 생성본", use_container_width=True)
-                                except Exception as e2:
-                                    st.error(f"생성 실패: {e2}")
-                    else:
-                        st.error("⚠️ 구글 키 설정 오류")
+                        edit_instruction = edit_instruction.lower().repl

@@ -3,3 +3,4 @@ streamlit
 Pillow
 streamlit-authenticator==0.3.3
 pyyaml
+google-cloud-aiplatform

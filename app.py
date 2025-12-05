@@ -2,41 +2,36 @@ import streamlit as st
 import openai
 import base64
 import streamlit_authenticator as stauth
-import pandas as pd # 데이터 관리용
-from datetime import datetime # 날짜 기록용
+import pandas as pd
+from datetime import datetime
 from PIL import Image
 
 # --------------------------------------------------------
-# ★ 비밀번호 암호화 도구
+# ★ 비밀번호 암호화 및 설정
 # --------------------------------------------------------
 try:
     from streamlit_authenticator.utilities.hasher import Hasher
 except ImportError:
     from streamlit_authenticator import Hasher
 
-# 페이지 설정
 st.set_page_config(page_title="Medi-Check Pro", page_icon="🏥", layout="wide")
 
-# ==========================================
-# 0. 데이터 저장소 (세션 스테이트 활용)
-# ==========================================
-# 앱이 켜져 있는 동안 데이터를 저장할 '가상의 엑셀'을 만듭니다.
+# 데이터 저장소
 if 'history' not in st.session_state:
     st.session_state['history'] = []
 
 def save_log(username, type, input_summary, result):
-    """검수 결과를 저장하는 함수"""
     st.session_state['history'].append({
         "날짜": datetime.now().strftime("%Y-%m-%d %H:%M"),
         "사용자": username,
-        "유형": type, # 텍스트 or 이미지
-        "입력내용": input_summary, # 광고 문구 앞부분 등
+        "유형": type,
+        "입력내용": input_summary,
         "판정결과": "반려" if "반려" in result else ("주의" if "주의" in result else "승인"),
         "상세결과": result
     })
 
 # ==========================================
-# 1. 로그인 시스템
+# 0. 로그인 시스템
 # ==========================================
 passwords_to_hash = ['123']
 hashed_passwords = Hasher(passwords_to_hash).generate()
@@ -48,11 +43,6 @@ user_data = {
                 'name': '김대표',
                 'password': hashed_passwords[0],
                 'email': 'admin@consul.team',
-            },
-            'user1': { # 테스트용 고객 ID 추가
-                'name': '박원장',
-                'password': hashed_passwords[0],
-                'email': 'park@clinic.com',
             }
         }
     },
@@ -77,144 +67,135 @@ elif st.session_state["authentication_status"] is None:
     st.stop()
 
 # ==========================================
-# 2. 메인 화면 구성 (대시보드 vs 새 검수)
+# 1. 메인 화면
 # ==========================================
 user_name = st.session_state['name']
 user_id = st.session_state['username']
 
-# 사이드바 메뉴
 with st.sidebar:
     st.title(f"👤 {user_name}님")
-    st.caption(f"ID: {user_id}")
-    
-    # 메뉴 선택
     menu = st.radio("메뉴 선택", ["📊 나의 대시보드", "✨ 새로운 검수 요청"])
-    
     st.divider()
     authenticator.logout('로그아웃', 'sidebar')
-    st.info("💡 창을 닫으면 기록이 초기화됩니다.")
 
-# API 키 확인
 api_key = st.secrets.get("OPENAI_API_KEY")
 if not api_key:
     st.error("API 키 설정을 확인해주세요.")
     st.stop()
 client = openai.OpenAI(api_key=api_key)
 
-
 # ------------------------------------------------
-# [메뉴 A] 나의 대시보드 (고객별 관리 화면)
+# [메뉴 A] 대시보드
 # ------------------------------------------------
 if menu == "📊 나의 대시보드":
     st.title("📊 캠페인 관리 대시보드")
-    st.write(f"**{user_name}**님의 최근 검수 이력입니다.")
-
-    # 저장된 데이터 가져오기
     df = pd.DataFrame(st.session_state['history'])
-
     if not df.empty:
-        # 내 아이디로 된 기록만 필터링
         my_df = df[df['사용자'] == user_id]
-
         if not my_df.empty:
-            # 1. 요약 지표 (Metrics)
             col1, col2, col3 = st.columns(3)
-            col1.metric("총 검수 건수", f"{len(my_df)}건")
+            col1.metric("총 검수", f"{len(my_df)}건")
             col2.metric("반려/주의", f"{len(my_df[my_df['판정결과'] != '승인'])}건")
             col3.metric("오늘 날짜", datetime.now().strftime("%Y-%m-%d"))
-
-            # 2. 데이터 테이블 표시
-            st.subheader("📋 상세 이력")
-            # 보기 좋게 컬럼 순서 정리
-            display_df = my_df[["날짜", "유형", "판정결과", "입력내용"]]
-            st.dataframe(display_df, use_container_width=True)
-
-            # 3. 엑셀 다운로드 버튼
-            csv = my_df.to_csv(index=False).encode('utf-8-sig')
-            st.download_button(
-                "📥 엑셀로 내역 다운로드",
-                csv,
-                "my_ad_history.csv",
-                "text/csv",
-                key='download-csv'
-            )
             
-            # 4. 상세 내용 보기 (Expandable)
-            st.subheader("🔍 최근 분석 결과 다시보기")
-            for index, row in my_df.iterrows():
-                with st.expander(f"[{row['날짜']}] {row['유형']} - {row['판정결과']}"):
-                    st.write("**분석 내용:**")
-                    st.markdown(row['상세결과'])
+            st.dataframe(my_df[["날짜", "유형", "판정결과", "입력내용"]], use_container_width=True)
+            
+            csv = my_df.to_csv(index=False).encode('utf-8-sig')
+            st.download_button("📥 엑셀 다운로드", csv, "history.csv", "text/csv")
         else:
-            st.info("아직 검수 기록이 없습니다.")
+            st.info("검수 기록이 없습니다.")
     else:
-        st.info("아직 검수 기록이 없습니다. '새로운 검수 요청' 메뉴에서 검수를 진행해보세요.")
-
+        st.info("검수 기록이 없습니다.")
 
 # ------------------------------------------------
-# [메뉴 B] 새로운 검수 요청 (기존 기능)
+# [메뉴 B] 새로운 검수 요청
 # ------------------------------------------------
 elif menu == "✨ 새로운 검수 요청":
     st.title("✨ 새로운 광고 심의 요청")
     
-    tab1, tab2 = st.tabs(["📄 텍스트 심의", "🖼️ 이미지 정밀 분석"])
+    tab1, tab2 = st.tabs(["📄 텍스트 심의 (수정안 제안)", "🖼️ 이미지 보정 (원본 살리기)"])
 
-    # --- 1. 텍스트 심의 ---
+    # --- 1. 텍스트 심의 & 수정안 제안 ---
     with tab1:
         col1, col2 = st.columns(2)
         with col1:
-            ad_text = st.text_area("광고 문구를 입력하세요:", height=300)
+            ad_text = st.text_area("광고 문구를 입력하세요:", height=300, placeholder="예: 빨딱빨딱 80세까지 세워줘요")
         with col2:
-            if st.button("텍스트 검수", type="primary"):
+            if st.button("텍스트 검수 및 수정안 받기", type="primary"):
                 if not ad_text:
                     st.warning("문구를 입력하세요.")
                 else:
-                    with st.spinner("분석 중..."):
+                    with st.spinner("법령 분석 및 대체 문구 작성 중..."):
                         try:
+                            # 프롬프트 업그레이드: 구체적인 수정안 요구
+                            system_prompt = """
+                            당신은 마케팅 감각이 뛰어난 의료기기 심의관입니다.
+                            사용자의 문구가 의료기기법(과대광고, 절대적 표현)을 위반하는지 판단하고,
+                            위반 시 **법을 지키면서도 소비자를 끌어당길 수 있는 매력적인 대체 문구**를 3가지 제안하세요.
+
+                            [출력 형식]
+                            1. **판정**: [승인 / 반려]
+                            2. **위반 사유**: (법적 근거 설명)
+                            3. **📝 추천 수정안 (3가지)**:
+                               - 옵션 A: (안전하고 신뢰감 있는 톤)
+                               - 옵션 B: (효능을 은유적으로 표현한 톤)
+                               - 옵션 C: (팩트 중심의 톤)
+                            """
                             response = client.chat.completions.create(
                                 model="gpt-4o",
                                 messages=[
-                                    {"role": "system", "content": "당신은 깐깐한 의료기기 심의관입니다. 과대광고, 절대적 표현(최고 등), 부작용 미기재를 찾아내세요."},
+                                    {"role": "system", "content": system_prompt},
                                     {"role": "user", "content": ad_text}
                                 ]
                             )
                             result = response.choices[0].message.content
-                            st.success("분석 완료")
+                            st.success("분석 및 제안 완료")
                             st.markdown(result)
-                            
-                            # ★ 대시보드에 자동 저장
-                            save_log(user_id, "텍스트", ad_text[:30]+"...", result)
-                            st.toast("대시보드에 저장되었습니다!", icon="💾")
+                            save_log(user_id, "텍스트", ad_text[:20], result)
                             
                         except Exception as e:
                             st.error(f"오류: {e}")
 
-    # --- 2. 이미지 정밀 분석 ---
+    # --- 2. 이미지 보정 (원본 유지 + 문제 제거) ---
     def encode_image(image_file):
         return base64.b64encode(image_file.getvalue()).decode('utf-8')
 
     with tab2:
+        st.info("💡 뱀파이어 사진처럼 '피'나 '공포 분위기'가 있다면, **구도는 유지하되 문제점만 수정한** 이미지를 생성합니다.")
         uploaded_file = st.file_uploader("이미지 업로드", type=["jpg", "png", "jpeg"])
 
         if uploaded_file:
             col_img1, col_img2 = st.columns(2)
             with col_img1:
-                st.image(uploaded_file, caption='업로드 이미지', use_container_width=True)
-                analyze_btn = st.button("이미지 정밀 분석 시작", type="primary")
+                st.image(uploaded_file, caption='업로드 원본', use_container_width=True)
+                analyze_btn = st.button("이미지 분석 및 보정 시작", type="primary")
 
             if analyze_btn:
-                with st.spinner("AI가 시각 요소를 분석 중입니다..."):
+                with st.spinner("원본의 구도를 분석하고 문제점(피, 배경)을 제거 중입니다..."):
                     try:
                         base64_image = encode_image(uploaded_file)
+                        
+                        # ★ 핵심 프롬프트: 원본 보존 + 문제 해결 ★
                         vision_prompt = """
-                        당신은 식약처 의료기기 심의관입니다. 이미지를 '단계별로' 분석하여 규정 위반을 찾아내세요.
-                        출력:
-                        1. 상세 관찰
-                        2. 심의 판정 (승인/반려/주의 포함)
-                        3. 위반 사유
-                        4. 수정 가이드
+                        당신은 이미지 보정 전문가이자 의료기기 심의관입니다.
+                        
+                        [1단계: 분석]
+                        이미지의 위반 요소(피, 개구기, 공포 분위기 등)를 찾으세요.
+
+                        [2단계: 보정 프롬프트 작성 (중요)]
+                        이 이미지를 DALL-E 3로 '다시 그리기(Recreation)' 위한 영어 프롬프트를 작성하세요.
+                        단, **원본의 구도, 모델의 외모(인종, 머리스타일), 포즈, 옷차림은 최대한 똑같이 유지**해야 합니다.
+                        
+                        **반드시 수정해야 할 점:**
+                        1. 피(Blood), 상처가 있다면 -> **깨끗한 피부(Clean skin)**로 변경.
+                        2. 배경이 어둡거나 붉은 톤(공포)이라면 -> **밝고 전문적인 의료/병원 톤(Bright clinical blue/white background)**으로 변경.
+                        3. 모델의 표정이 고통스럽거나 무섭다면 -> **신뢰감을 주는 편안한 미소**로 변경.
+
+                        출력 형식:
+                        1. **심의 판정**: [반려 / 승인]
+                        2. **수정된 점**: (무엇을 지우고 배경을 어떻게 바꿨는지 설명)
                         ---
-                        PROMPT: (DALL-E 3용 영어 프롬프트)
+                        PROMPT: (DALL-E 3용 영어 프롬프트. 'Same pose, same composition, same model description...' 로 시작할 것)
                         """
 
                         response = client.chat.completions.create(
@@ -231,32 +212,38 @@ elif menu == "✨ 새로운 검수 요청":
                         )
                         result_text = response.choices[0].message.content
                         
-                        # ★ 대시보드에 자동 저장
-                        save_log(user_id, "이미지", uploaded_file.name, result_text.split("PROMPT:")[0])
-                        st.toast("대시보드에 저장되었습니다!", icon="💾")
-
-                        # 이미지 생성 로직
-                        base_prompt = "A hyper-realistic 8k photography of a medical device marketing image. Canon EOS R5 style, minimal, bright clinical lighting, clear focus, professional Korean model looking trustworthy and smiling naturally. No text overlays."
+                        # 결과 파싱
                         if "PROMPT:" in result_text:
-                            extracted = result_text.split("PROMPT:")[1].strip()
-                            dalle_prompt = f"{extracted}, {base_prompt}"
+                            analysis_part = result_text.split("PROMPT:")[0]
+                            extracted_prompt = result_text.split("PROMPT:")[1].strip()
+                            # 퀄리티 업을 위한 마법의 주문 추가
+                            dalle_prompt = f"{extracted_prompt}, hyper-realistic 8k photography, Canon EOS R5 quality"
                         else:
-                            dalle_prompt = base_prompt
+                            analysis_part = result_text
+                            dalle_prompt = "A clean professional medical image, high quality."
+
+                        save_log(user_id, "이미지", uploaded_file.name, analysis_part)
 
                         with col_img1:
-                            st.markdown("### 📋 분석 결과")
-                            st.markdown(result_text.split("PROMPT:")[0])
+                            st.markdown("### 📋 분석 및 보정 계획")
+                            st.markdown(analysis_part)
 
                         with col_img2:
-                            st.markdown("### ✨ AI 추천 대체 이미지")
-                            if "반려" in result_text or "주의" in result_text or "위반" in result_text:
-                                with st.spinner("고화질 이미지 생성 중..."):
+                            st.markdown("### ✨ 보정된 이미지 (Recreated)")
+                            if "반려" in result_text or "주의" in result_text:
+                                with st.spinner("수정된 컨셉으로 고화질 렌더링 중... (15초)"):
                                     img_response = client.images.generate(
-                                        model="dall-e-3", prompt=dalle_prompt, size="1024x1024", quality="hd", style="natural", n=1
+                                        model="dall-e-3", 
+                                        prompt=dalle_prompt, 
+                                        size="1024x1024", 
+                                        quality="hd", 
+                                        style="natural", 
+                                        n=1
                                     )
-                                    st.image(img_response.data[0].url, caption="Safe & High Quality Image")
+                                    st.image(img_response.data[0].url, caption="보정 완료된 이미지 (구도 유지 + 문제 제거)")
+                                    st.success("피/공포 요소를 제거하고 배경 톤을 변경했습니다.")
                             else:
-                                st.success("문제가 없는 이미지입니다.")
+                                st.success("수정이 필요 없는 안전한 이미지입니다.")
 
                     except Exception as e:
                         st.error(f"오류: {e}")

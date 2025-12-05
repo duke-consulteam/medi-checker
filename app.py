@@ -24,23 +24,27 @@ except ImportError:
 st.set_page_config(page_title="Medi-Check Pro", page_icon="🏥", layout="wide")
 
 # --------------------------------------------------------
-# 0. 구글 연결 설정 (강력한 연결 모드)
+# 0. 구글 연결 설정 (자동 보정 기능 탑재)
 # --------------------------------------------------------
 google_ready = False
 imagen_model = None
 google_error_msg = ""
 
-# Secrets에 [gcp] 섹션이 있는지 확인
 if "gcp" in st.secrets:
     try:
-        # 1. Secrets 정보를 가져옵니다. (딕셔너리 복사)
-        # toml에서 가져온 정보는 수정이 불가능할 수 있어 dict()로 변환합니다.
+        # 1. Secrets 정보를 가져옵니다. (수정 가능한 딕셔너리로 변환)
         service_account_info = dict(st.secrets["gcp"])
 
-        # ★ 핵심 수정: 줄바꿈 문자(\n) 강제 치환 ★
-        # TOML에서 넘어올 때 \n이 문자로 인식되는 문제를 해결합니다.
+        # ★ 핵심 수정 1: 줄바꿈 문자(\n) 자동 복구 ★
         if "private_key" in service_account_info:
             service_account_info["private_key"] = service_account_info["private_key"].replace("\\n", "\n")
+
+        # ★ 핵심 수정 2: 빠진 필수 항목(token_uri) 자동 주입 ★
+        # 이 부분이 없어서 방금 에러가 난 것입니다. 코드가 알아서 채워넣습니다.
+        if "token_uri" not in service_account_info:
+            service_account_info["token_uri"] = "https://oauth2.googleapis.com/token"
+        if "type" not in service_account_info:
+            service_account_info["type"] = "service_account"
 
         # 2. 구글 인증
         credentials = service_account.Credentials.from_service_account_info(service_account_info)
@@ -54,7 +58,6 @@ if "gcp" in st.secrets:
         google_ready = True
         
     except Exception as e:
-        # 에러 내용을 저장해뒀다가 사이드바에 보여줍니다.
         google_error_msg = str(e)
 else:
     google_error_msg = "Secrets에 [gcp] 섹션이 없습니다."
@@ -112,14 +115,13 @@ with st.sidebar:
     st.divider()
     authenticator.logout('로그아웃', 'sidebar')
     
-    # 연결 상태 및 에러 표시
+    # 연결 상태 표시
     if google_ready:
         st.success("✅ 구글 Imagen 연결됨")
     else:
         st.warning("⚠️ DALL-E 모드 동작 중")
         if google_error_msg:
-            # 에러 메시지를 작게 보여줍니다.
-            st.error(f"구글 연결 오류:\n{google_error_msg}")
+            st.error(f"오류: {google_error_msg}")
 
 
 # [메뉴 A] 대시보드
@@ -207,4 +209,4 @@ elif menu == "✨ 검수 요청":
                             except Exception as e:
                                 st.error(f"구글 수정 실패: {e}")
                     else:
-                        st.error("⚠️ 구글 연결 오류 (사이드바 메시지를 확인하세요)")
+                        st.error("⚠️ 구글 연결 오류 (사이드바 확인)")

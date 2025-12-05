@@ -3,16 +3,13 @@ import openai
 import base64
 import streamlit_authenticator as stauth
 from PIL import Image
-import yaml
-from yaml.loader import SafeLoader
 
 # 페이지 설정
 st.set_page_config(page_title="Medi-Check Pro", page_icon="🏥", layout="wide")
 
 # ==========================================
-# 0. 로그인 시스템
+# 0. 로그인 시스템 설정
 # ==========================================
-
 # 사용자 정보 (아이디: admin / 비번: 123)
 user_data = {
     'credentials': {
@@ -28,7 +25,7 @@ user_data = {
     'preauthorized': {'emails': []}
 }
 
-# 로그인 위젯 설정
+# 로그인 위젯 초기화
 authenticator = stauth.Authenticate(
     user_data['credentials'],
     user_data['cookie']['name'],
@@ -37,26 +34,29 @@ authenticator = stauth.Authenticate(
     user_data['preauthorized']
 )
 
-# ★ 여기가 수정된 부분입니다 ('Login' 글자 추가) ★
-name, authentication_status, username = authenticator.login('Login', 'main')
+# ★ 수정된 부분: 괄호 안을 비워서 최신 버전에 맞췄습니다 ★
+authenticator.login()
 
-if authentication_status == False:
+# 로그인 상태 확인
+if st.session_state["authentication_status"] is False:
     st.error('아이디 또는 비밀번호가 틀렸습니다.')
     st.stop()
-elif authentication_status == None:
+elif st.session_state["authentication_status"] is None:
     st.warning('아이디(admin)와 비밀번호(123)를 입력하세요.')
     st.stop()
 
 # ==========================================
-# 로그인 성공 시 화면
+# 로그인 성공 시에만 아래 내용이 실행됨
 # ==========================================
 
+# 사이드바 (로그아웃 버튼)
 with st.sidebar:
-    st.title(f"👤 {name}님 환영합니다")
+    st.title(f"👤 {st.session_state['name']}님 환영합니다")
     authenticator.logout('로그아웃', 'sidebar')
     st.divider()
     st.info("💡 프로토타입 버전입니다.")
 
+# 메인 화면
 st.title("🏥 의료기기 광고 AI 통합 관리")
 
 # API 키 설정
@@ -67,6 +67,7 @@ if not api_key:
 
 client = openai.OpenAI(api_key=api_key)
 
+# 탭 구성
 tab1, tab2 = st.tabs(["📄 텍스트 심의", "🖼️ 이미지 정밀 분석"])
 
 # --- 1. 텍스트 심의 ---
